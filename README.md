@@ -133,6 +133,17 @@ RF [mcp, rot, pip, dip]
 TH [cmc, axl, mcp, ipl]
 ```
 
+## LEAP 抓糖 Diffusion Policy 示教采集
+
+独立的 [`dp-teleop-collector/`](dp-teleop-collector/) 主入口只采集 LEAP
+手指的低维本体反馈：16 关节实际角度、16 关节速度、16 电机电流原始值，
+动作是实际发送的 16 维关节位置目标。相机只负责人手映射，RGB-D、FR3 位姿和
+FR3 动作都不会进入该训练数据。采集、验证和 Zarr v2 导出全部使用 Python
+命令，详见子目录的 [`README.md`](dp-teleop-collector/README.md)。
+
+旧的 RGB-D / FR3 抓取与释放采集入口仍作为可选高级工具保留，但不要和新的
+48 维纯 LEAP 数据混在同一个训练集中。
+
 ## 测试
 
 ```powershell

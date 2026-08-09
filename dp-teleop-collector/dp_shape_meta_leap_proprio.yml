@@ -1,0 +1,17 @@
+# Image-free LEAP candy-grasp contract.
+#
+# robot_state ordering:
+#   [actual_position_rad (16),
+#    finite_difference_velocity_rad_s (16),
+#    signed_dynamixel_present_current_raw (16)]
+# action is the 16-D post-slew goal position actually sent to the hand.
+shape_meta:
+  action:
+    shape: [16]
+  obs:
+    robot_state:
+      shape: [48]
+      type: low_dim
+
+# goal_position and position_error are exported as diagnostics, not policy
+# observations. The camera, RGB-D, FR3 pose, and FR3 action are absent.
