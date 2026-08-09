@@ -33,6 +33,8 @@ class ServerConfig:
     recover_errors_on_start: bool
     allow_error_recovery: bool
     allow_one_shot_motion: bool
+    allow_orientation_motion: bool
+    max_orientation_step_rad: float
 
     @classmethod
     def from_file(cls, path: Path) -> "ServerConfig":
@@ -78,6 +80,8 @@ class ServerConfig:
             recover_errors_on_start=bool(raw.get("recover_errors_on_start", False)),
             allow_error_recovery=bool(raw.get("allow_error_recovery", False)),
             allow_one_shot_motion=bool(raw.get("allow_one_shot_motion", False)),
+            allow_orientation_motion=bool(raw.get("allow_orientation_motion", False)),
+            max_orientation_step_rad=float(raw.get("max_orientation_step_rad", 0.35)),
         )
         config.validate()
         return config
@@ -103,6 +107,7 @@ class ServerConfig:
             ("max_relative_displacement_m", self.max_relative_displacement_m),
             ("max_motion_dynamics_factor", self.max_motion_dynamics_factor),
             ("relative_dynamics_factor", self.relative_dynamics_factor),
+            ("max_orientation_step_rad", self.max_orientation_step_rad),
         ):
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -112,6 +117,8 @@ class ServerConfig:
             raise ValueError("relative_dynamics_factor must be in (0, 1]")
         if not 0.0 < self.max_motion_dynamics_factor <= 1.0:
             raise ValueError("max_motion_dynamics_factor must be in (0, 1]")
+        if self.max_orientation_step_rad > math.pi:
+            raise ValueError("max_orientation_step_rad must not exceed pi")
         if any(
             lower >= upper
             for lower, upper in zip(self.workspace_min_m, self.workspace_max_m)
@@ -146,6 +153,8 @@ class ServerConfig:
             "max_motion_dynamics_factor": self.max_motion_dynamics_factor,
             "allow_error_recovery": self.allow_error_recovery,
             "allow_one_shot_motion": self.allow_one_shot_motion,
+            "allow_orientation_motion": self.allow_orientation_motion,
+            "max_orientation_step_rad": self.max_orientation_step_rad,
         }
 
     @staticmethod

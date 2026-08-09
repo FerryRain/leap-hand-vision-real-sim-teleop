@@ -27,6 +27,7 @@ from .protocol import (
     encode_message,
     error_response,
     finite_float,
+    matrix3,
     positive_int,
     vector3,
 )
@@ -204,12 +205,17 @@ class FrankaBridgeServer:
             absolute = request.get("absolute", False)
             if not isinstance(absolute, bool):
                 raise ProtocolError("absolute must be true or false")
+            raw_rotation = request.get("rotation_matrix")
+            rotation = (
+                None if raw_rotation is None else matrix3(request, "rotation_matrix")
+            )
             await asyncio.to_thread(
                 self.runtime.move_global,
                 connection_id,
                 vector3(request, "position"),
                 absolute=absolute,
                 dynamics_factor=finite_float(request, "dynamics_factor", default=0.1),
+                rotation_matrix=rotation,
             )
             return ack(
                 request,

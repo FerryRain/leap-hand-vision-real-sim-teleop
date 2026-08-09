@@ -62,6 +62,26 @@ def vector3(message: dict[str, Any], key: str) -> tuple[float, float, float]:
     return vector  # type: ignore[return-value]
 
 
+def matrix3(
+    message: dict[str, Any],
+    key: str,
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    value = message.get(key)
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ProtocolError(f"{key} must contain exactly three rows")
+    rows: list[tuple[float, float, float]] = []
+    for index, row in enumerate(value):
+        try:
+            rows.append(vector3({"row": row}, "row"))
+        except ProtocolError as error:
+            raise ProtocolError(f"{key} row {index + 1}: {error}") from error
+    return tuple(rows)  # type: ignore[return-value]
+
+
 def finite_float(
     message: dict[str, Any],
     key: str,

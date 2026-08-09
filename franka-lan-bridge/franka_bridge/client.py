@@ -169,14 +169,20 @@ class FrankaBridgeClient:
         *,
         absolute: bool = False,
         dynamics_factor: float = 0.1,
+        rotation_matrix: Sequence[Sequence[float]] | None = None,
     ) -> dict[str, Any]:
         self._require_control()
-        return await self.request(
-            "move_global",
-            position=[float(item) for item in position],
-            absolute=absolute,
-            dynamics_factor=dynamics_factor,
-        )
+        fields: dict[str, Any] = {
+            "position": [float(item) for item in position],
+            "absolute": absolute,
+            "dynamics_factor": dynamics_factor,
+        }
+        if rotation_matrix is not None:
+            fields["rotation_matrix"] = self._matrix3(
+                rotation_matrix,
+                "rotation_matrix",
+            )
+        return await self.request("move_global", **fields)
 
     async def stop(self) -> None:
         await self.request("stop")
@@ -318,3 +324,13 @@ class FrankaBridgeClient:
         if not all(math.isfinite(item) for item in vector):
             raise ValueError(f"{name} must contain finite values")
         return vector  # type: ignore[return-value]
+
+    @classmethod
+    def _matrix3(
+        cls,
+        value: Sequence[Sequence[float]],
+        name: str,
+    ) -> list[list[float]]:
+        if len(value) != 3:
+            raise ValueError(f"{name} must contain three rows")
+        return [list(cls._vector3(row, f"{name} row")) for row in value]

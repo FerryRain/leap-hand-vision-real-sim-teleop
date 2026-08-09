@@ -76,9 +76,10 @@ cp server_config.example.json server_config.json
 编辑 `server_config.json`：
 
 - `controller_root` 指向包含 `utils/franka_controller.py` 的仓库根目录，按现有项目通常是 `/home/asus/zyy`；
+- `controller_class` 使用 `franka_bridge.pose_controller:PoseFrankaController`，它继承现有控制器并增加绝对姿态规划，同时为旧版状态补齐旋转矩阵；
 - `robot_host` 填 FR3 的 FCI 地址；
 - 把 `allowed_client_cidrs` 中的 `192.168.1.10/32` 改成 Windows 电脑的准确 IP；
-- 第一次联调保持 `allow_one_shot_motion=false` 和 `allow_error_recovery=false`；
+- 第一次联调保持 `allow_one_shot_motion=false`、`allow_orientation_motion=false` 和 `allow_error_recovery=false`；
 - 根据真实工作台设置 `workspace_min_m`、`workspace_max_m`，不要直接沿用示例范围。
 
 ## 3. 设置共享密钥
@@ -279,15 +280,17 @@ python franka_calibrate_points.py `
   --overwrite
 ```
 
-保存文件同时记录了各点的旋转矩阵用于复核，但现有 `FrankaController.move_global()` 只接收 XYZ，所以回放时保持机械臂开始运动时的当前末端旋转。
+标定文件会同时保存各点的 Base 坐标 XYZ 和 3×3 旋转矩阵。`PoseFrankaController` 会从 Franky 当前 4×4 末端位姿中补齐旧版控制器缺少的旋转字段。旧标定文件如果没有旋转矩阵，必须在更新服务端后使用 `--overwrite` 重新标定。
 
 ### 顺序运动程序
 
 真实运动前必须在 FR3 服务端的 `server_config.json` 中：
 
 1. 根据实际工作台收紧 `workspace_min_m` 和 `workspace_max_m`；
-2. 将 `allow_one_shot_motion` 改为 `true`；
-3. 重启 `franka_server.py`。
+2. 确认 `controller_class` 为 `franka_bridge.pose_controller:PoseFrankaController`；
+3. 将 `allow_one_shot_motion` 和 `allow_orientation_motion` 都改为 `true`；
+4. 设置 `max_orientation_step_rad`，示例 `0.35` 约等于每次最多旋转 20°；
+5. 重启 `franka_server.py`。
 
 然后运行：
 
@@ -302,7 +305,8 @@ python franka_next_point.py `
 
 - 每按一次 `SPACE`，依次规划到 `P1 → P2 → P3 → P4`；
 - 运动过程中按 `E`、`Q` 或 `Esc`，立即发送软件停止并退出；
-- 到达每个点后检查实际 XYZ，默认误差必须不超过 `5 mm`；
+- 每个点同时规划标定的 XYZ 和旋转姿态；
+- 到达后检查实际 XYZ 和旋转，默认误差分别不超过 `5 mm` 和 `3°`；
 - P4 完成后程序释放控制权并退出。
 
 从其他点开始：
@@ -368,6 +372,7 @@ D:\Environment\Anaconda\envs\autograsp\python.exe -m unittest discover -s tests 
 - `franka_bridge/server.py`：认证、状态流和请求分发；
 - `franka_bridge/runtime.py`：机器人侧租约、看门狗和安全状态机；
 - `franka_bridge/client.py`：可嵌入遥操程序的异步客户端；
+- `franka_bridge/pose_controller.py`：继承原控制器并增加绝对 XYZ + 旋转规划；
 - `franka_bridge/waypoints.py`：四点文件格式和工作空间验证；
 - `franka_bridge/terminal_keys.py`：无额外依赖的非阻塞单键输入；
 - `server_config.example.json`：安全配置模板；

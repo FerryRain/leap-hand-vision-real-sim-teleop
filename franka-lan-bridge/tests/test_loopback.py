@@ -87,16 +87,19 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
                 target.position_m,
                 absolute=True,
                 dynamics_factor=0.1,
+                rotation_matrix=target.rotation_matrix,
             )
-            error = await wait_for_motion(
+            position_error, orientation_error = await wait_for_motion(
                 client,
                 target,
                 accepted_at_s=float(response["server_monotonic_s"]),
                 timeout_s=1.0,
                 arrival_tolerance_m=0.001,
+                orientation_tolerance_rad=0.01,
                 keys=NoKeys(),
             )
-            self.assertLessEqual(error, 0.001)
+            self.assertLessEqual(position_error, 0.001)
+            self.assertLessEqual(orientation_error, 0.01)
             await client.release_control()
 
     async def test_operator_key_stops_motion_and_revokes_control(self) -> None:
@@ -116,6 +119,7 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
                 target.position_m,
                 absolute=True,
                 dynamics_factor=0.1,
+                rotation_matrix=target.rotation_matrix,
             )
             with self.assertRaises(OperatorStop):
                 await wait_for_motion(
@@ -124,6 +128,7 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
                     accepted_at_s=float(response["server_monotonic_s"]),
                     timeout_s=1.0,
                     arrival_tolerance_m=0.001,
+                    orientation_tolerance_rad=0.01,
                     keys=StopKeys(),
                 )
             self.assertFalse(self.runtime.bridge_status()["control_lease_active"])

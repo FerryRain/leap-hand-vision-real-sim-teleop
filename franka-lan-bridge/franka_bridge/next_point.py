@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from .client import FrankaBridgeClient
 from .terminal_keys import TerminalKeys
-from .waypoints import Waypoint, WaypointSet, distance_m
+from .waypoints import Waypoint, WaypointSet, distance_m, rotation_distance_rad
 
 
 class KeySource(Protocol):
@@ -36,6 +36,20 @@ async def run_sequence(args: argparse.Namespace) -> None:
                 "server has allow_one_shot_motion=false; validate the workspace "
                 "and enable it in server_config.json before playback"
             )
+        if not bool(client.safety.get("allow_orientation_motion")):
+            raise RuntimeError(
+                "server has allow_orientation_motion=false; validate the recorded "
+                "orientations and enable it in server_config.json before playback"
+            )
+        missing_rotation = [
+            point.name for point in waypoints.points if point.rotation_matrix is None
+        ]
+        if missing_rotation:
+            raise RuntimeError(
+                "waypoint file is missing rotation_matrix for "
+                f"{', '.join(missing_rotation)}; update the server pose controller "
+                "and recalibrate all four points"
+            )
         waypoints.validate_workspace(client.safety)
         maximum_dynamics = float(client.safety.get("max_motion_dynamics_factor", 0.0))
         if args.dynamics_factor > maximum_dynamics:
@@ -45,7 +59,7 @@ async def run_sequence(args: argparse.Namespace) -> None:
             )
 
         await client.acquire_control()
-        print("Control acquired. Current orientation will be preserved.")
+        print("Control acquired. Position and calibrated orientation will be planned.")
         print("SPACE: move to next point | E/Q: software stop and exit")
         try:
             with TerminalKeys() as keys:
@@ -67,20 +81,25 @@ async def run_sequence(args: argparse.Namespace) -> None:
                         target.position_m,
                         absolute=True,
                         dynamics_factor=args.dynamics_factor,
+                        rotation_matrix=target.rotation_matrix,
                     )
                     accepted_at_s = float(response["server_monotonic_s"])
                     print(f"Moving to {target.name}; E/Q stops motion.")
-                    final_error = await wait_for_motion(
+                    position_error, orientation_error = await wait_for_motion(
                         client,
                         target,
                         accepted_at_s=accepted_at_s,
                         timeout_s=args.motion_timeout,
                         arrival_tolerance_m=args.arrival_tolerance,
+                        orientation_tolerance_rad=math.radians(
+                            args.orientation_tolerance_deg
+                        ),
                         keys=keys,
                     )
                     print(
                         f"Reached {target.name}; "
-                        f"position error={final_error * 1000:.2f} mm"
+                        f"position error={position_error * 1000:.2f} mm; "
+                        f"orientation error={math.degrees(orientation_error):.2f} deg"
                     )
 
                     target_index += 1
@@ -106,8 +125,9 @@ async def wait_for_motion(
     accepted_at_s: float,
     timeout_s: float,
     arrival_tolerance_m: float,
+    orientation_tolerance_rad: float,
     keys: KeySource,
-) -> float:
+) -> tuple[float, float]:
     deadline = time.monotonic() + timeout_s
     last_position: tuple[float, float, float] | None = None
     while time.monotonic() < deadline:
@@ -124,14 +144,31 @@ async def wait_for_motion(
         last_position = _position_from_state(state)
         active = bool(state.get("bridge", {}).get("one_shot_active"))
         if not active:
-            error = distance_m(last_position, target.position_m)
-            if error > arrival_tolerance_m:
+            position_error = distance_m(last_position, target.position_m)
+            current_rotation = _rotation_from_state(state)
+            if target.rotation_matrix is None:
                 await client.stop()
                 raise RuntimeError(
-                    f"motion ended {error * 1000:.2f} mm from {target.name}; "
+                    f"{target.name} has no rotation_matrix; stop acknowledged"
+                )
+            orientation_error = rotation_distance_rad(
+                current_rotation,
+                target.rotation_matrix,
+            )
+            if position_error > arrival_tolerance_m:
+                await client.stop()
+                raise RuntimeError(
+                    f"motion ended {position_error * 1000:.2f} mm from "
+                    f"{target.name}; stop acknowledged"
+                )
+            if orientation_error > orientation_tolerance_rad:
+                await client.stop()
+                raise RuntimeError(
+                    f"motion ended {math.degrees(orientation_error):.2f} deg from "
+                    f"{target.name} orientation; "
                     "stop acknowledged"
                 )
-            return error
+            return position_error, orientation_error
 
     await client.stop()
     suffix = "" if last_position is None else f"; last position={last_position}"
@@ -150,6 +187,30 @@ def _position_from_state(state: dict[str, Any]) -> tuple[float, float, float]:
     return position  # type: ignore[return-value]
 
 
+def _rotation_from_state(
+    state: dict[str, Any],
+) -> tuple[
+    tuple[float, float, float],
+    tuple[float, float, float],
+    tuple[float, float, float],
+]:
+    robot = state.get("robot")
+    end_effector = robot.get("end_effector") if isinstance(robot, dict) else None
+    raw = (
+        end_effector.get("rotation_matrix") if isinstance(end_effector, dict) else None
+    )
+    if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+        raise RuntimeError("state is missing end_effector.rotation_matrix")
+    rows = tuple(
+        tuple(float(item) for item in row)
+        for row in raw
+        if isinstance(row, (list, tuple)) and len(row) == 3
+    )
+    if len(rows) != 3 or not all(math.isfinite(item) for row in rows for item in row):
+        raise RuntimeError("end_effector.rotation_matrix is not a finite 3x3 matrix")
+    return rows  # type: ignore[return-value]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Move to the next calibrated FR3 point on each SPACE press"
@@ -161,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dynamics-factor", type=float, default=0.05)
     parser.add_argument("--motion-timeout", type=float, default=30.0)
     parser.add_argument("--arrival-tolerance", type=float, default=0.005)
+    parser.add_argument("--orientation-tolerance-deg", type=float, default=3.0)
     parser.add_argument("--client-name", default="four-point-playback")
     parser.add_argument("--request-timeout", type=float, default=2.0)
     return parser
@@ -176,6 +238,10 @@ def main() -> None:
     _validate_positive(args.dynamics_factor, "--dynamics-factor")
     _validate_positive(args.motion_timeout, "--motion-timeout")
     _validate_positive(args.arrival_tolerance, "--arrival-tolerance")
+    _validate_positive(
+        args.orientation_tolerance_deg,
+        "--orientation-tolerance-deg",
+    )
     try:
         asyncio.run(run_sequence(args))
     except KeyboardInterrupt:

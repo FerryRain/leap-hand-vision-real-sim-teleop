@@ -6,7 +6,7 @@
     "192.168.1.10/32"
   ],
   "controller_root": "/home/asus/zyy",
-  "controller_class": "utils.franka_controller:FrankaController",
+  "controller_class": "franka_bridge.pose_controller:PoseFrankaController",
   "robot_host": "10.19.131.201",
   "state_hz": 20.0,
   "control_hz": 30.0,
@@ -22,5 +22,7 @@
   "relative_dynamics_factor": 0.05,
   "recover_errors_on_start": false,
   "allow_error_recovery": false,
-  "allow_one_shot_motion": false
+  "allow_one_shot_motion": false,
+  "allow_orientation_motion": false,
+  "max_orientation_step_rad": 0.35
 }

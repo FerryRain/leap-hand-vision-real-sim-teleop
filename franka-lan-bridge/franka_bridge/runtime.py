@@ -48,6 +48,15 @@ class ControllerLike(Protocol):
         asynchronous: bool = False,
     ) -> object: ...
 
+    def move_global_pose(
+        self,
+        position: Sequence[float],
+        rotation_matrix: Sequence[Sequence[float]],
+        *,
+        dynamics_factor: float = 1.0,
+        asynchronous: bool = False,
+    ) -> object: ...
+
     def recover_from_errors(self) -> bool: ...
 
 
@@ -192,28 +201,61 @@ class FrankaRuntime:
         *,
         absolute: bool,
         dynamics_factor: float,
+        rotation_matrix: Sequence[Sequence[float]] | None = None,
     ) -> None:
         self._require_one_shot_enabled()
         vector = self._finite_vector3(value, "position")
         self._validate_dynamics_factor(dynamics_factor)
         with self._lock:
             self._require_owner_locked(owner)
-            current_position, _rotation = self._current_pose_locked()
+            target_rotation = (
+                None
+                if rotation_matrix is None
+                else self._valid_rotation_matrix(rotation_matrix)
+            )
+            if target_rotation is not None:
+                if not absolute:
+                    raise ValueError(
+                        "rotation_matrix is only supported for absolute motion"
+                    )
+                if not self.config.allow_orientation_motion:
+                    raise PermissionError(
+                        "orientation motion is disabled by server config"
+                    )
+                _position, current_rotation = self._current_pose_locked()
+                rotation_step = self._rotation_distance_rad(
+                    current_rotation,
+                    target_rotation,
+                )
+                if rotation_step > self.config.max_orientation_step_rad:
+                    raise ValueError(
+                        f"orientation step {rotation_step:.4f} rad exceeds server "
+                        f"limit {self.config.max_orientation_step_rad:.4f} rad"
+                    )
             if absolute:
                 target = vector
             else:
                 self._validate_relative_displacement(vector)
+                current_position = self._current_position_locked()
                 target = tuple(
                     current_position[index] + vector[index] for index in range(3)
                 )
             self._validate_workspace(target)
             self._stop_velocity_locked()
-            self.controller.move_global(
-                vector,
-                absolute=absolute,
-                dynamics_factor=dynamics_factor,
-                asynchronous=True,
-            )
+            if target_rotation is None:
+                self.controller.move_global(
+                    vector,
+                    absolute=absolute,
+                    dynamics_factor=dynamics_factor,
+                    asynchronous=True,
+                )
+            else:
+                self.controller.move_global_pose(
+                    vector,
+                    target_rotation,
+                    dynamics_factor=dynamics_factor,
+                    asynchronous=True,
+                )
             self._one_shot_active = True
             self._one_shot_owner = owner
             self._lease_deadline = (
@@ -395,9 +437,71 @@ class FrankaRuntime:
             raise RuntimeError("state snapshot is missing end_effector")
         position = self._finite_vector3(end_effector.get("position", ()), "position")
         raw_rotation = end_effector.get("rotation_matrix")
-        if not isinstance(raw_rotation, (list, tuple)) or len(raw_rotation) != 3:
+        try:
+            row_count = len(raw_rotation)  # type: ignore[arg-type]
+        except TypeError as error:
+            raise RuntimeError(
+                "state snapshot is missing a 3x3 rotation_matrix"
+            ) from error
+        if row_count != 3:
             raise RuntimeError("state snapshot is missing a 3x3 rotation_matrix")
         rotation = tuple(
-            self._finite_vector3(row, "rotation_matrix row") for row in raw_rotation
+            self._finite_vector3(row, "rotation_matrix row")
+            for row in raw_rotation  # type: ignore[union-attr]
         )
         return position, rotation  # type: ignore[return-value]
+
+    def _current_position_locked(self) -> tuple[float, float, float]:
+        snapshot = self.controller.get_state_snapshot()
+        end_effector = snapshot.get("end_effector")
+        if not isinstance(end_effector, dict):
+            raise RuntimeError("state snapshot is missing end_effector")
+        return self._finite_vector3(end_effector.get("position", ()), "position")
+
+    @classmethod
+    def _valid_rotation_matrix(
+        cls,
+        value: Sequence[Sequence[float]],
+    ) -> tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ]:
+        if len(value) != 3:
+            raise ValueError("rotation_matrix must contain three rows")
+        rotation = tuple(
+            cls._finite_vector3(row, "rotation_matrix row") for row in value
+        )
+        for row in range(3):
+            for other in range(3):
+                dot = math.fsum(
+                    rotation[row][column] * rotation[other][column]
+                    for column in range(3)
+                )
+                expected = 1.0 if row == other else 0.0
+                if abs(dot - expected) > 1e-3:
+                    raise ValueError("rotation_matrix must be orthonormal")
+        determinant = (
+            rotation[0][0]
+            * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
+            - rotation[0][1]
+            * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])
+            + rotation[0][2]
+            * (rotation[1][0] * rotation[2][1] - rotation[1][1] * rotation[2][0])
+        )
+        if abs(determinant - 1.0) > 1e-3:
+            raise ValueError("rotation_matrix determinant must be +1")
+        return rotation  # type: ignore[return-value]
+
+    @staticmethod
+    def _rotation_distance_rad(
+        first: Sequence[Sequence[float]],
+        second: Sequence[Sequence[float]],
+    ) -> float:
+        trace = math.fsum(
+            first[row][column] * second[row][column]
+            for row in range(3)
+            for column in range(3)
+        )
+        cosine = max(-1.0, min(1.0, (trace - 1.0) / 2.0))
+        return math.acos(cosine)

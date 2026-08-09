@@ -17,11 +17,14 @@ REQUIRED_POINT_COUNT = 4
 class Waypoint:
     name: str
     position_m: tuple[float, float, float]
-    rotation_matrix: tuple[
-        tuple[float, float, float],
-        tuple[float, float, float],
-        tuple[float, float, float],
-    ]
+    rotation_matrix: (
+        tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+            tuple[float, float, float],
+        ]
+        | None
+    )
     robot_timestamp_s: float | None
 
     @classmethod
@@ -30,9 +33,11 @@ class Waypoint:
         if not isinstance(end_effector, dict):
             raise ValueError("robot state is missing end_effector")
         position = _vector3(end_effector.get("position"), "end_effector.position")
-        rotation = _matrix3(
-            end_effector.get("rotation_matrix"),
-            "end_effector.rotation_matrix",
+        raw_rotation = end_effector.get("rotation_matrix")
+        rotation = (
+            None
+            if raw_rotation is None
+            else _matrix3(raw_rotation, "end_effector.rotation_matrix")
         )
         timestamp = robot.get("timestamp_s")
         robot_timestamp_s = None if timestamp is None else float(timestamp)
@@ -56,10 +61,15 @@ class Waypoint:
         robot_timestamp_s = None if timestamp is None else float(timestamp)
         if robot_timestamp_s is not None and not math.isfinite(robot_timestamp_s):
             raise ValueError(f"point {index + 1} robot timestamp must be finite")
+        raw_rotation = raw.get("rotation_matrix")
         return cls(
             name=name,
             position_m=_vector3(raw.get("position_m"), "position_m"),
-            rotation_matrix=_matrix3(raw.get("rotation_matrix"), "rotation_matrix"),
+            rotation_matrix=(
+                None
+                if raw_rotation is None
+                else _matrix3(raw_rotation, "rotation_matrix")
+            ),
             robot_timestamp_s=robot_timestamp_s,
         )
 
@@ -67,7 +77,11 @@ class Waypoint:
         return {
             "name": self.name,
             "position_m": list(self.position_m),
-            "rotation_matrix": [list(row) for row in self.rotation_matrix],
+            "rotation_matrix": (
+                None
+                if self.rotation_matrix is None
+                else [list(row) for row in self.rotation_matrix]
+            ),
             "robot_timestamp_s": self.robot_timestamp_s,
         }
 
@@ -151,6 +165,21 @@ def distance_m(first: Sequence[float], second: Sequence[float]) -> float:
     return math.sqrt(
         math.fsum((float(a) - float(b)) ** 2 for a, b in zip(first, second))
     )
+
+
+def rotation_distance_rad(
+    first: Sequence[Sequence[float]],
+    second: Sequence[Sequence[float]],
+) -> float:
+    first_matrix = _matrix3(first, "first rotation")
+    second_matrix = _matrix3(second, "second rotation")
+    trace = math.fsum(
+        first_matrix[row][column] * second_matrix[row][column]
+        for row in range(3)
+        for column in range(3)
+    )
+    cosine = max(-1.0, min(1.0, (trace - 1.0) / 2.0))
+    return math.acos(cosine)
 
 
 def _exactly_four(

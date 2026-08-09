@@ -12,6 +12,11 @@ class MockFrankaController:
         self.position = [0.4, 0.0, 0.3]
         self.linear_velocity = [0.0, 0.0, 0.0]
         self.angular_velocity = [0.0, 0.0, 0.0]
+        self.rotation_matrix = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
         self.current_frame = "global"
         self._continuous = False
         self._motion_end = 0.0
@@ -88,6 +93,22 @@ class MockFrankaController:
     def recover_from_errors(self) -> bool:
         return True
 
+    def move_global_pose(
+        self,
+        position: Sequence[float],
+        rotation_matrix: Sequence[Sequence[float]],
+        *,
+        dynamics_factor: float = 1.0,
+        asynchronous: bool = False,
+    ) -> object:
+        del dynamics_factor, asynchronous
+        self.position = [float(item) for item in position]
+        self.rotation_matrix = [
+            [float(item) for item in row] for row in rotation_matrix
+        ]
+        self._motion_end = time.monotonic() + 0.1
+        return object()
+
     def get_state_snapshot(self) -> dict[str, object]:
         self._integrate()
         return {
@@ -106,11 +127,7 @@ class MockFrankaController:
             },
             "end_effector": {
                 "position": self.position.copy(),
-                "rotation_matrix": [
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                ],
+                "rotation_matrix": [row.copy() for row in self.rotation_matrix],
                 "linear_velocity": self.linear_velocity.copy(),
                 "angular_velocity": self.angular_velocity.copy(),
                 "external_wrench_global": [0.0] * 6,

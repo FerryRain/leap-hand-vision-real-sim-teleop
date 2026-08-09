@@ -55,6 +55,17 @@ class WaypointTests(unittest.TestCase):
                 }
             )
 
+    def test_position_only_robot_state_can_be_recorded(self) -> None:
+        waypoint = Waypoint.from_robot_state(
+            "P1",
+            {
+                "timestamp_s": 1.0,
+                "end_effector": {"position": [0.4, 0.0, 0.3]},
+            },
+        )
+        self.assertEqual(waypoint.position_m, (0.4, 0.0, 0.3))
+        self.assertIsNone(waypoint.rotation_matrix)
+
     def test_distance_is_in_metres(self) -> None:
         self.assertAlmostEqual(distance_m((0.0, 0.0, 0.0), (0.003, 0.004, 0.0)), 0.005)
 

@@ -3,10 +3,32 @@ from __future__ import annotations
 import time
 import unittest
 
+import numpy as np
 from franka_bridge.mock_controller import MockFrankaController
 from franka_bridge.runtime import FrankaRuntime
 
 from tests.helpers import test_config
+
+
+class PositionOnlyMockFrankaController(MockFrankaController):
+    def get_state_snapshot(self) -> dict[str, object]:
+        snapshot = super().get_state_snapshot()
+        end_effector = snapshot["end_effector"]
+        assert isinstance(end_effector, dict)
+        end_effector.pop("rotation_matrix")
+        return snapshot
+
+
+class NumpyRotationMockFrankaController(MockFrankaController):
+    def get_state_snapshot(self) -> dict[str, object]:
+        snapshot = super().get_state_snapshot()
+        end_effector = snapshot["end_effector"]
+        assert isinstance(end_effector, dict)
+        end_effector["rotation_matrix"] = np.asarray(
+            end_effector["rotation_matrix"],
+            dtype=float,
+        )
+        return snapshot
 
 
 class RuntimeSafetyTests(unittest.TestCase):
@@ -71,6 +93,85 @@ class RuntimeSafetyTests(unittest.TestCase):
                 )
         finally:
             runtime.close()
+
+    def test_absolute_global_motion_does_not_require_rotation_matrix(self) -> None:
+        controller = PositionOnlyMockFrankaController()
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            target = (0.41, -0.01, 0.23)
+            runtime.move_global(
+                "owner",
+                target,
+                absolute=True,
+                dynamics_factor=0.05,
+            )
+            self.assertEqual(tuple(controller.position), target)
+        finally:
+            runtime.close()
+
+    def test_absolute_global_pose_commands_rotation(self) -> None:
+        controller = MockFrankaController()
+        runtime = FrankaRuntime(controller, test_config())
+        rotation = (
+            (0.9950041653, -0.0998334166, 0.0),
+            (0.0998334166, 0.9950041653, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        try:
+            runtime.acquire("owner")
+            runtime.move_global(
+                "owner",
+                (0.41, -0.01, 0.23),
+                absolute=True,
+                dynamics_factor=0.05,
+                rotation_matrix=rotation,
+            )
+            self.assertEqual(
+                controller.rotation_matrix, [list(row) for row in rotation]
+            )
+        finally:
+            runtime.close()
+
+    def test_absolute_pose_accepts_numpy_rotation_from_real_controller(self) -> None:
+        controller = NumpyRotationMockFrankaController()
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            runtime.move_global(
+                "owner",
+                (0.41, -0.01, 0.23),
+                absolute=True,
+                dynamics_factor=0.05,
+                rotation_matrix=np.eye(3),
+            )
+            self.assertEqual(controller.position, [0.41, -0.01, 0.23])
+        finally:
+            runtime.close()
+
+    def test_orientation_motion_respects_enable_and_step_limit(self) -> None:
+        rotation = (
+            (0.0, -1.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        for config in (
+            test_config(allow_orientation_motion=False),
+            test_config(max_orientation_step_rad=0.2),
+        ):
+            runtime = FrankaRuntime(MockFrankaController(), config)
+            try:
+                runtime.acquire("owner")
+                with self.assertRaises((PermissionError, ValueError)):
+                    runtime.move_global(
+                        "owner",
+                        (0.41, -0.01, 0.23),
+                        absolute=True,
+                        dynamics_factor=0.05,
+                        rotation_matrix=rotation,
+                    )
+            finally:
+                runtime.close()
 
     def test_stop_command_revokes_lease(self) -> None:
         runtime = FrankaRuntime(MockFrankaController(), test_config())
