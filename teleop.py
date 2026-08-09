@@ -13,6 +13,7 @@ from typing import Any
 import mujoco
 import mujoco.viewer
 import numpy as np
+from src.d455 import D455MediaPipeCamera
 from src.leap_hand_hardware import DynamixelLeapHand, HardwareSettings, MockLeapHand
 from src.leap_hand_mapping import JOINT_NAMES
 from src.leap_hand_scene import LeapDemoScene, build_leap_demo_scene
@@ -66,6 +67,8 @@ def main() -> None:
 
     source = str(run_cfg["source"] if args.source is None else args.source)
     device = str(run_cfg["device"] if args.device is None else args.device)
+    if source not in {"camera", "d455", "mock"}:
+        raise ValueError("run.source must be camera, d455, or mock")
     duration_s = float(
         run_cfg["duration_s"] if args.duration is None else args.duration
     )
@@ -114,15 +117,21 @@ def main() -> None:
     period_s = 1.0 / update_hz
     steps_per_update = max(1, round(period_s / simulation_timestep_s))
 
-    camera = (
-        MediaPipeCamera(
+    camera: MediaPipeCamera | D455MediaPipeCamera | None
+    if source == "camera":
+        camera = MediaPipeCamera(
             config,
             args.camera_index,
             disable_preview=args.no_preview,
         )
-        if source == "camera"
-        else None
-    )
+    elif source == "d455":
+        camera = D455MediaPipeCamera(
+            config,
+            args.d455_serial,
+            disable_preview=args.no_preview,
+        )
+    else:
+        camera = None
     driver: MockLeapHand | DynamixelLeapHand
     if device == "real":
         driver = DynamixelLeapHand(hardware_settings, args.port)
@@ -344,6 +353,14 @@ def main() -> None:
         "version": 1,
         "entry": "real_leap_hand_with_mujoco_mirror",
         "source": source,
+        "tracking_camera": (
+            camera.diagnostics()
+            if isinstance(camera, D455MediaPipeCamera)
+            else {
+                "source": "camera" if camera is not None else "mock",
+                "raw_rgbd_saved": False,
+            }
+        ),
         "device": device,
         "serial_port": args.port if device == "real" else None,
         "finger_only": True,
@@ -438,11 +455,12 @@ def _parse_args() -> argparse.Namespace:
         description="Mirror camera-controlled LEAP fingers to MuJoCo and hardware"
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--source", choices=("camera", "mock"))
+    parser.add_argument("--source", choices=("camera", "d455", "mock"))
     parser.add_argument("--device", choices=("mock", "real"))
     parser.add_argument("--port", default="")
     parser.add_argument("--enable-torque", action="store_true")
     parser.add_argument("--camera-index", type=int)
+    parser.add_argument("--d455-serial")
     parser.add_argument("--duration", type=float)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--headless", action="store_true")

@@ -8,6 +8,26 @@ camera:
   flip_horizontal: true
   preview: true
 
+# Optional Intel RealSense D455 source selected by --source d455. Depth is
+# aligned to color and gates tracking; finger angles use MediaPipe world
+# landmarks rather than per-fingertip depth samples.
+d455:
+  serial: ""
+  enforce_model: true
+  required_model: D455
+  color_width: 1280
+  color_height: 720
+  depth_width: 848
+  depth_height: 480
+  fps: 30
+  frame_timeout_ms: 1000
+  warmup_frames: 5
+  depth_patch_radius_px: 2
+  minimum_palm_depth_samples: 3
+  minimum_depth_m: 0.15
+  maximum_depth_m: 1.20
+  emitter_enabled: true
+
 control:
   update_hz: 30.0
   simulation_timestep_s: 0.002

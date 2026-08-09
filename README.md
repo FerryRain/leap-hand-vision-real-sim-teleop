@@ -26,6 +26,41 @@ conda env list
 
 后续示例中的 `python` 均指安装了 `requirements.txt` 的同一个 Python。
 
+## Intel RealSense D455 RGB-D 版本
+
+D455 模式同时读取彩色和深度流，把深度对齐到彩色画面，并从腕部和四个掌根
+关键点的深度中位数恢复掌部三维位置。只有掌部深度在配置范围内时，该帧才会
+通过跟踪门；手指弯曲仍使用 MediaPipe world landmarks，因此单个指尖深度空洞
+不会直接造成 LEAP 关节闭合。腕部和机械臂仍然不受控制，默认不保存 RGB-D 帧。
+
+在同一个 Python 环境中安装可选依赖：
+
+```powershell
+python -m pip install -r requirements-d455.txt
+```
+
+先使用 mock 硬件确认 D455 预览、掌部 `xyz` 和 MuJoCo 手指映射：
+
+```powershell
+python teleop.py --source d455 --device mock
+```
+
+有多台 RealSense 时显式指定 D455 序列号：
+
+```powershell
+python teleop.py --source d455 --d455-serial 123456789 --device mock
+```
+
+确认一根手指一根手指的映射和连续 8 帧跟踪门后，才连接真实手：
+
+```powershell
+python teleop.py --source d455 --device real --port COM4 --enable-torque
+```
+
+D455 流规格、深度窗口和 0.15--1.20 m 有效范围位于 `config.yml` 的
+`d455` 段。日志会记录相机型号、序列号、固件、深度比例、有效/无效深度帧数和
+最终掌部三维位置。相机型号不符或掌部深度无效时，该帧会按跟踪丢失安全处理。
+
 ## 先做无硬件安全测试
 
 下面的命令会打开摄像头预览和 MuJoCo 窗口，但不会连接电机：
