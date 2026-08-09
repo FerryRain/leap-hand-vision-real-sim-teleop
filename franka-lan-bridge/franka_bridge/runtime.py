@@ -88,6 +88,9 @@ class FrankaRuntime:
         self._one_shot_owner: str | None = None
         self._last_fault: str | None = None
         self._watchdog_stop_count = 0
+        self._velocity_workspace_blocked = False
+        self._workspace_guard_stop_count = 0
+        self._last_workspace_guard_reason: str | None = None
         self._thread = threading.Thread(
             target=self._control_loop,
             name="franka-bridge-control",
@@ -151,6 +154,7 @@ class FrankaRuntime:
             if vector_norm(linear_vector) < 1e-9 and vector_norm(angular_vector) < 1e-9:
                 self._velocity_target = None
                 self._stop_velocity_locked()
+                self._velocity_workspace_blocked = False
                 return
             if self._one_shot_active:
                 self._stop_all_locked()
@@ -292,6 +296,9 @@ class FrankaRuntime:
                 "one_shot_active": self._one_shot_active,
                 "last_velocity_sequence": self._last_sequence,
                 "watchdog_stop_count": self._watchdog_stop_count,
+                "velocity_workspace_blocked": self._velocity_workspace_blocked,
+                "workspace_guard_stop_count": self._workspace_guard_stop_count,
+                "last_workspace_guard_reason": self._last_workspace_guard_reason,
                 "last_fault": self._last_fault,
             }
 
@@ -336,6 +343,17 @@ class FrankaRuntime:
                 self._stop_velocity_locked()
                 return
 
+            workspace_reason = self._velocity_workspace_reason_locked(target)
+            if workspace_reason is not None:
+                if not self._velocity_workspace_blocked:
+                    self._workspace_guard_stop_count += 1
+                self._velocity_workspace_blocked = True
+                self._last_workspace_guard_reason = workspace_reason
+                self._velocity_target = None
+                self._stop_velocity_locked()
+                return
+            self._velocity_workspace_blocked = False
+
             if not self._velocity_active or self._velocity_frame != target.frame:
                 self._stop_velocity_locked()
                 self.controller.start_continuous(
@@ -361,6 +379,7 @@ class FrankaRuntime:
 
     def _clear_control_locked(self, *, stop_robot: bool) -> None:
         self._velocity_target = None
+        self._velocity_workspace_blocked = False
         if stop_robot:
             self._stop_all_locked()
         else:
@@ -374,6 +393,7 @@ class FrankaRuntime:
 
     def _stop_all_locked(self) -> None:
         self._velocity_target = None
+        self._velocity_workspace_blocked = False
         if self._velocity_active:
             self.controller.stop_continuous()
         if self._one_shot_active or bool(
@@ -384,6 +404,59 @@ class FrankaRuntime:
         self._velocity_frame = None
         self._one_shot_active = False
         self._one_shot_owner = None
+
+    def _velocity_workspace_reason_locked(
+        self,
+        target: VelocityTarget,
+    ) -> str | None:
+        position, rotation = self._current_pose_locked()
+        for axis, (value, lower, upper) in enumerate(
+            zip(
+                position,
+                self.config.workspace_min_m,
+                self.config.workspace_max_m,
+            )
+        ):
+            if value < lower or value > upper:
+                return (
+                    "current end-effector position is outside the configured "
+                    f"workspace on axis {axis}: {value:.6f} not in "
+                    f"[{lower:.6f}, {upper:.6f}]"
+                )
+
+        if target.frame == "global":
+            global_linear = target.linear
+        else:
+            global_linear = tuple(
+                math.fsum(
+                    rotation[row][column] * target.linear[column] for column in range(3)
+                )
+                for row in range(3)
+            )
+
+        prediction_horizon_s = max(
+            self.config.velocity_timeout_ms / 1000.0,
+            2.0 / self.config.control_hz,
+        )
+        predicted_position = tuple(
+            position[index] + global_linear[index] * prediction_horizon_s
+            for index in range(3)
+        )
+        for axis, (value, lower, upper) in enumerate(
+            zip(
+                predicted_position,
+                self.config.workspace_min_m,
+                self.config.workspace_max_m,
+            )
+        ):
+            if value < lower or value > upper:
+                return (
+                    "predicted end-effector position would leave the configured "
+                    f"workspace on axis {axis} within "
+                    f"{prediction_horizon_s:.3f} s: {value:.6f} not in "
+                    f"[{lower:.6f}, {upper:.6f}]"
+                )
+        return None
 
     def _require_one_shot_enabled(self) -> None:
         if not self.config.allow_one_shot_motion:

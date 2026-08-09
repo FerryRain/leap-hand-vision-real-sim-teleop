@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import importlib
 import math
+import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -101,6 +103,25 @@ class D455Settings:
             raise ValueError(
                 "D455 required_model cannot be empty when enforcement is on"
             )
+
+
+@dataclass(frozen=True)
+class D455RGBDFrame:
+    """One unannotated display-aligned RGB-D capture.
+
+    ``color_bgr`` and ``depth_units`` are owned, contiguous copies.  Depth is
+    stored in the camera's native units; multiply by ``depth_scale_m`` for
+    metres.  ``camera_timestamp_ms`` is the RealSense color-frame timestamp
+    when the SDK exposes one, while ``capture_monotonic_s`` is always the local
+    monotonic clock sampled when the aligned frames were copied.
+    """
+
+    color_bgr: np.ndarray
+    depth_units: np.ndarray
+    capture_monotonic_s: float
+    camera_timestamp_ms: float | None
+    color_intrinsics: dict[str, Any] | None
+    depth_scale_m: float
 
 
 def median_depth_m(
@@ -285,8 +306,14 @@ class D455MediaPipeCamera:
 
         self.latest_palm_position_m: tuple[float, float, float] | None = None
         self.latest_palm_depth_m: float | None = None
+        self.latest_hand_display_uv: np.ndarray | None = None
         self.depth_valid_frames = 0
         self.depth_invalid_frames = 0
+        self._latest_color_bgr: np.ndarray | None = None
+        self._latest_depth_units: np.ndarray | None = None
+        self._latest_capture_monotonic_s: float | None = None
+        self._latest_camera_timestamp_ms: float | None = None
+        self._latest_color_intrinsics: dict[str, Any] | None = None
 
     def read(self) -> tuple[np.ndarray | None, np.ndarray, str, float]:
         frames = self.pipeline.wait_for_frames(self.settings.frame_timeout_ms)
@@ -298,8 +325,29 @@ class D455MediaPipeCamera:
 
         color = np.asanyarray(color_frame.get_data())
         depth = np.asanyarray(depth_frame.get_data())
-        frame = cv2.flip(color, 1) if self.flip_horizontal else color.copy()
-        display_depth = np.fliplr(depth) if self.flip_horizontal else depth
+        if color.ndim != 3 or color.shape[2] != 3:
+            raise RuntimeError("D455 color frame must have shape HxWx3")
+        if depth.ndim != 2:
+            raise RuntimeError("D455 aligned depth frame must be two-dimensional")
+
+        if self.flip_horizontal:
+            display_color = cv2.flip(color, 1)
+            display_depth = np.fliplr(depth)
+        else:
+            display_color = color
+            display_depth = depth
+        display_color = np.ascontiguousarray(display_color, dtype=np.uint8)
+        display_depth = np.ascontiguousarray(display_depth, dtype=np.uint16)
+
+        # Keep training observations independent from both the RealSense frame
+        # buffers and the preview image that MediaPipe drawing mutates below.
+        self._latest_color_bgr = display_color.copy(order="C")
+        self._latest_depth_units = display_depth.copy(order="C")
+        self._latest_capture_monotonic_s = time.monotonic()
+        self._latest_camera_timestamp_ms = self._camera_timestamp_ms(color_frame)
+        self._latest_color_intrinsics = self._color_intrinsics_metadata(color_frame)
+        frame = display_color.copy(order="C")
+        self.latest_hand_display_uv = None
         result = self.hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if not result.multi_hand_landmarks:
             self.latest_palm_position_m = None
@@ -360,6 +408,7 @@ class D455MediaPipeCamera:
             palm_point[0] *= -1.0
         self.latest_palm_position_m = tuple(float(value) for value in palm_point)
         self.latest_palm_depth_m = float(palm_depth_m)
+        self.latest_hand_display_uv = normalized[:, :2].copy(order="C")
         self.depth_valid_frames += 1
 
         world_sets = getattr(result, "multi_hand_world_landmarks", None)
@@ -371,6 +420,24 @@ class D455MediaPipeCamera:
         else:
             points = normalized
         return points, frame, handedness, confidence
+
+    def latest_rgbd(self) -> D455RGBDFrame:
+        """Return safe copies of the most recently captured aligned RGB-D frame."""
+
+        if (
+            self._latest_color_bgr is None
+            or self._latest_depth_units is None
+            or self._latest_capture_monotonic_s is None
+        ):
+            raise RuntimeError("D455 has not captured an RGB-D frame yet; call read()")
+        return D455RGBDFrame(
+            color_bgr=self._latest_color_bgr.copy(order="C"),
+            depth_units=self._latest_depth_units.copy(order="C"),
+            capture_monotonic_s=float(self._latest_capture_monotonic_s),
+            camera_timestamp_ms=self._latest_camera_timestamp_ms,
+            color_intrinsics=deepcopy(self._latest_color_intrinsics),
+            depth_scale_m=float(self.depth_scale_m),
+        )
 
     def show(
         self,
@@ -442,10 +509,15 @@ class D455MediaPipeCamera:
                 self.settings.fps,
             ],
             "depth_aligned_to_color": True,
+            "flip_horizontal": self.flip_horizontal,
             "depth_scale_m": self.depth_scale_m,
             "depth_valid_frames": self.depth_valid_frames,
             "depth_invalid_frames": self.depth_invalid_frames,
             "final_palm_position_m": self.latest_palm_position_m,
+            "latest_rgbd_available": self._latest_color_bgr is not None,
+            "latest_capture_monotonic_s": self._latest_capture_monotonic_s,
+            "latest_camera_timestamp_ms": self._latest_camera_timestamp_ms,
+            "color_intrinsics": deepcopy(self._latest_color_intrinsics),
             "raw_rgbd_saved": False,
         }
 
@@ -464,3 +536,28 @@ class D455MediaPipeCamera:
             return str(device.get_info(key))
         except Exception:
             return "unknown"
+
+    @staticmethod
+    def _camera_timestamp_ms(color_frame: Any) -> float | None:
+        try:
+            timestamp_ms = float(color_frame.get_timestamp())
+        except Exception:
+            return None
+        return timestamp_ms if math.isfinite(timestamp_ms) else None
+
+    @staticmethod
+    def _color_intrinsics_metadata(color_frame: Any) -> dict[str, Any] | None:
+        try:
+            intrinsics = color_frame.profile.as_video_stream_profile().get_intrinsics()
+            return {
+                "width": int(intrinsics.width),
+                "height": int(intrinsics.height),
+                "ppx": float(intrinsics.ppx),
+                "ppy": float(intrinsics.ppy),
+                "fx": float(intrinsics.fx),
+                "fy": float(intrinsics.fy),
+                "model": str(intrinsics.model),
+                "coeffs": [float(value) for value in intrinsics.coeffs],
+            }
+        except Exception:
+            return None

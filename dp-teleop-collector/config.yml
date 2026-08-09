@@ -1,0 +1,47 @@
+collector:
+  # DP demonstrations are resampled from the 30 Hz control loop at this rate.
+  sample_hz: 10.0
+  image_width: 320
+  image_height: 240
+  jpeg_quality: 92
+  minimum_episode_steps: 20
+  maximum_episode_s: 90.0
+  # Accepted episodes are strict by default. Re-record after any invalid sample.
+  maximum_invalid_steps: 0
+  maximum_camera_age_s: 0.10
+  maximum_leap_state_age_s: 0.10
+  maximum_franka_state_age_s: 0.15
+  # Includes the frame currently being JPEG/PNG encoded and fsynced.
+  max_pending_frames: 4
+
+# Primary image-free collector for learning the contact-rich candy grasp with
+# the LEAP fingers only. RGB-D may still drive the human-hand mapper, but no
+# image/depth or Franka state is written to these episodes.
+leap_proprio_collector:
+  sample_hz: 10.0
+  minimum_episode_steps: 20
+  maximum_episode_s: 45.0
+  # Exported timestamps are resampled onto the exact DP clock. This tolerance
+  # only covers floating-point roundoff in that fixed grid.
+  sample_period_tolerance_s: 0.001
+  # Reject interpolation across stale feedback (a little over two 30 Hz frames).
+  maximum_feedback_bracket_s: 0.075
+  maximum_consecutive_feedback_failures: 3
+  max_pending_steps: 16
+
+franka_teleop:
+  # Keep false until the mapping has been checked against a dry-run server and
+  # then at very low speed with an empty real workspace.
+  mapping_confirmed: false
+
+  # D455 display-frame [x right, y down, z forward] -> FR3 base velocity.
+  # This default means robot x <- camera z, robot y <- -camera x,
+  # robot z <- -camera y. Change it for the actual camera mounting.
+  camera_to_global_matrix:
+    - [0.0, 0.0, 1.0]
+    - [-1.0, 0.0, 0.0]
+    - [0.0, -1.0, 0.0]
+  linear_gain_per_s: 0.60
+  deadband_m: 0.010
+  maximum_hand_offset_m: 0.20
+  maximum_linear_speed_m_s: 0.020

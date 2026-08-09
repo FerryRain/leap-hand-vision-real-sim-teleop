@@ -1,0 +1,17 @@
+# Shape contract for episodes recorded with --franka-mode teleop.
+shape_meta:
+  action:
+    shape: [22]
+  obs:
+    camera_0:
+      shape: [3, 240, 320]
+      type: rgb
+    robot_state:
+      shape: [45]
+      type: low_dim
+    task_onehot:
+      shape: [2]
+      type: low_dim
+
+# depth_0 is archived as aligned uint16 depth. The official image workspace
+# needs a custom single-channel depth encoder before using it as an observation.

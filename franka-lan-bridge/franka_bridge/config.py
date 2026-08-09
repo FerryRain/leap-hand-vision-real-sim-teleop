@@ -140,6 +140,7 @@ class ServerConfig:
 
     def public_safety_settings(self) -> dict[str, Any]:
         return {
+            "continuous_velocity_workspace_guard": True,
             "state_hz": self.state_hz,
             "control_hz": self.control_hz,
             "velocity_timeout_ms": self.velocity_timeout_ms,

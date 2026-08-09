@@ -80,6 +80,101 @@ class RuntimeSafetyTests(unittest.TestCase):
         finally:
             runtime.close()
 
+    def test_global_velocity_stops_before_predicted_workspace_exit(self) -> None:
+        controller = MockFrankaController()
+        controller.position = [0.699, 0.0, 0.3]
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            runtime.submit_velocity(
+                "owner", 1, "global", (0.05, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            time.sleep(0.03)
+
+            status = runtime.bridge_status()
+            self.assertTrue(status["velocity_workspace_blocked"])
+            self.assertEqual(status["workspace_guard_stop_count"], 1)
+            self.assertIn("predicted", status["last_workspace_guard_reason"])
+            self.assertEqual(controller.velocity_command_count, 0)
+            self.assertIsNone(status["last_fault"])
+
+            runtime.submit_velocity(
+                "owner", 2, "global", (-0.01, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            time.sleep(0.03)
+            status = runtime.bridge_status()
+            self.assertFalse(status["velocity_workspace_blocked"])
+            self.assertEqual(status["workspace_guard_stop_count"], 1)
+            self.assertIsNotNone(status["last_workspace_guard_reason"])
+            self.assertGreater(controller.velocity_command_count, 0)
+        finally:
+            runtime.close()
+
+    def test_local_velocity_is_rotated_to_global_for_workspace_guard(self) -> None:
+        controller = MockFrankaController()
+        controller.position = [0.4, 0.399, 0.3]
+        controller.rotation_matrix = [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            runtime.submit_velocity(
+                "owner", 1, "local", (0.05, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            time.sleep(0.03)
+
+            status = runtime.bridge_status()
+            self.assertTrue(status["velocity_workspace_blocked"])
+            self.assertIn("axis 1", status["last_workspace_guard_reason"])
+            self.assertEqual(controller.velocity_command_count, 0)
+        finally:
+            runtime.close()
+
+    def test_velocity_fails_closed_when_current_position_is_outside_workspace(
+        self,
+    ) -> None:
+        controller = MockFrankaController()
+        controller.position = [0.701, 0.0, 0.3]
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            runtime.submit_velocity(
+                "owner", 1, "global", (-0.01, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            time.sleep(0.03)
+
+            status = runtime.bridge_status()
+            self.assertTrue(status["velocity_workspace_blocked"])
+            self.assertIn("current", status["last_workspace_guard_reason"])
+            self.assertEqual(controller.velocity_command_count, 0)
+        finally:
+            runtime.close()
+
+    def test_zero_velocity_clears_current_workspace_block_diagnostic(self) -> None:
+        controller = MockFrankaController()
+        controller.position = [0.699, 0.0, 0.3]
+        runtime = FrankaRuntime(controller, test_config())
+        try:
+            runtime.acquire("owner")
+            runtime.submit_velocity(
+                "owner", 1, "global", (0.05, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            time.sleep(0.03)
+            self.assertTrue(runtime.bridge_status()["velocity_workspace_blocked"])
+
+            runtime.submit_velocity(
+                "owner", 2, "global", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+            )
+            status = runtime.bridge_status()
+            self.assertFalse(status["velocity_workspace_blocked"])
+            self.assertEqual(status["workspace_guard_stop_count"], 1)
+            self.assertIsNotNone(status["last_workspace_guard_reason"])
+        finally:
+            runtime.close()
+
     def test_one_shot_motion_is_bounded_by_step_and_workspace(self) -> None:
         runtime = FrankaRuntime(MockFrankaController(), test_config())
         try:

@@ -6,3 +6,10 @@ __pycache__/
 .idea/
 .vscode/
 logs/
+dp-teleop-collector/datasets/
+dp-teleop-collector/test-run-*/
+dp-teleop-collector/test-tmp-*/
+dp-teleop-collector/.test-tmp-*/
+dp-teleop-collector/.review-tmp-*/
+*.zarr/
+*.zarr.partial-*/

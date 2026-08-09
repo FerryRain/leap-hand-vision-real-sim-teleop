@@ -1,0 +1,17 @@
+# Shape contract for episodes recorded with FR3 off.
+shape_meta:
+  action:
+    shape: [16]
+  obs:
+    camera_0:
+      shape: [3, 240, 320]
+      type: rgb
+    robot_state:
+      shape: [16]
+      type: low_dim
+    task_onehot:
+      shape: [2]
+      type: low_dim
+
+# --franka-mode observe has a 45-D robot_state but still a 16-D action; use
+# the dimensions recorded in the exported Zarr manifest for that mode.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import websockets
-from franka_bridge.client import FrankaBridgeClient
+from franka_bridge.client import FrankaBridgeClient, RemoteError
 from franka_bridge.mock_controller import MockFrankaController
 from franka_bridge.next_point import OperatorStop, wait_for_motion
 from franka_bridge.runtime import FrankaRuntime
@@ -48,6 +48,10 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_state_and_velocity_round_trip(self) -> None:
         async with FrankaBridgeClient(self.uri, TOKEN) as client:
+            self.assertIs(
+                client.safety["continuous_velocity_workspace_guard"],
+                True,
+            )
             await client.acquire_control()
             await client.send_velocity((0.01, 0.0, 0.0), frame="global", wait_ack=True)
             state = await client.next_state(timeout_s=1.0)
@@ -66,6 +70,8 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
             await owner.send_velocity((0.01, 0.0, 0.0), wait_ack=True)
             await observer.stop()
             self.assertFalse(self.runtime.bridge_status()["control_lease_active"])
+            with self.assertRaises(RemoteError):
+                await owner.send_velocity((0.01, 0.0, 0.0), wait_ack=True)
         finally:
             await owner.close()
             await observer.close()
