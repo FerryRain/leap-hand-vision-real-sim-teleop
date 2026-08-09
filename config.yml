@@ -1,0 +1,73 @@
+camera:
+  index: 0
+  width: 1280
+  height: 720
+  detection_confidence: 0.70
+  tracking_confidence: 0.65
+  required_handedness: any
+  flip_horizontal: true
+  preview: true
+
+control:
+  update_hz: 30.0
+  simulation_timestep_s: 0.002
+  # Smaller values are steadier; larger values respond faster.
+  smoothing_alpha: 0.16
+  maximum_joint_step_rad: 0.10
+  joint_deadband_rad: 0.035
+  tracking_hold_s: 0.30
+  tracking_open_s: 0.90
+
+wrist:
+  # Fixed MuJoCo palm pose. Camera wrist motion is never commanded.
+  neutral_position_m: [0.000, 0.000, 0.220]
+
+mapping:
+  # LEAP order: IF[mcp,rot,pip,dip], MF, RF, TH[cmc,axl,mcp,ipl].
+  joint_open_rad:
+    [0.0, 0.0, 0.15, 0.10,
+     0.0, 0.0, 0.15, 0.10,
+     0.0, 0.0, 0.15, 0.10,
+     0.0, 0.0, 0.0, 0.0]
+  joint_closed_rad:
+    [1.45, 0.0, 1.55, 1.30,
+     1.45, 0.0, 1.55, 1.30,
+     1.45, 0.0, 1.55, 1.30,
+     1.20, 1.35, 1.35, 1.45]
+  long_human_open_deg: [5.0, 5.0, 5.0]
+  long_human_closed_deg: [55.0, 75.0, 65.0]
+  thumb_human_open_deg: [5.0, 5.0, 5.0]
+  thumb_human_closed_deg: [35.0, 50.0, 55.0]
+  thumb_opposition_open_ratio: 1.25
+  thumb_opposition_closed_ratio: 0.50
+  thumb_opposition_flexion_assist: [0.75, 0.65, 0.60]
+
+tuning:
+  # Press L while running after changing these values.
+  landmark_smoothing_alpha: 0.20
+  # Index, middle, ring, thumb. Recommended range: 0.5-1.5.
+  finger_gain: [1.0, 1.0, 1.0, 1.0]
+
+scene:
+  hand_model: models/leap_hand/right_hand.xml
+  finger_kp: 5.0
+
+hardware:
+  motor_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  baudrate: 4000000
+  kp: 600
+  ki: 0
+  kd: 200
+  current_limit: 350
+  side_gain_scale: 0.75
+  maximum_step_rad: 0.06
+  stable_tracking_frames: 8
+  disable_torque_on_exit: true
+
+run:
+  source: camera
+  device: mock
+  duration_s: 0.0
+  diagnostic_hz: 5.0
+  max_samples: 9000
+  max_read_failures: 3

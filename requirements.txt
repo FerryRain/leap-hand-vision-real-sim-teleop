@@ -1,0 +1,7 @@
+numpy==1.26.4
+mediapipe==0.10.21
+opencv-contrib-python==4.11.0.86
+mujoco==3.11.0
+PyYAML==6.0.3
+dynamixel-sdk==4.0.5
+pyserial==3.5
