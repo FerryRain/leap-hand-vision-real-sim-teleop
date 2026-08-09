@@ -1,11 +1,13 @@
 # LEAP Hand Vision Teleoperation: Real Hand + MuJoCo Mirror
 
-这个仓库只做一件事：摄像头识别人手的 21 个 MediaPipe 关键点，将手指姿态映射为 LEAP Hand 的 16 个关节目标，并把同一组安全限幅后的目标同时发送到：
+根目录的 LEAP 遥操程序负责：摄像头识别人手的 21 个 MediaPipe 关键点，将手指姿态映射为 LEAP Hand 的 16 个关节目标，并把同一组安全限幅后的目标同时发送到：
 
 - 真实 LEAP Hand；
 - MuJoCo 中固定腕部的 LEAP Hand 镜像。
 
-没有机械臂、物体抓取、腕部移动或末端位置控制。真实手和仿真手始终共享同一组 16 维目标。
+这个 LEAP 入口没有机械臂、物体抓取、腕部移动或末端位置控制。真实手和仿真手始终共享同一组 16 维目标。
+
+仓库另外提供独立的 [`franka-lan-bridge/`](franka-lan-bridge/)：让无显卡的 FR3 Linux 控制电脑在本地运行 `FrankaController`，Windows 遥操电脑通过同一局域网发送受限的高层运动命令并读取机械臂状态。该网络桥不会把机械臂加载进 LEAP/MuJoCo 入口，两部分可以独立部署和运行。完整双机安装、安全配置和测试命令见 [`franka-lan-bridge/README.md`](franka-lan-bridge/README.md)。
 
 ## 运行环境
 

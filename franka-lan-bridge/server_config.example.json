@@ -1,0 +1,26 @@
+{
+  "bind_host": "0.0.0.0",
+  "port": 8765,
+  "allowed_client_cidrs": [
+    "127.0.0.1/32",
+    "192.168.1.10/32"
+  ],
+  "controller_root": "/home/asus/zyy",
+  "controller_class": "utils.franka_controller:FrankaController",
+  "robot_host": "10.19.131.201",
+  "state_hz": 20.0,
+  "control_hz": 30.0,
+  "velocity_timeout_ms": 200,
+  "lease_timeout_ms": 1000,
+  "franky_command_timeout_ms": 150,
+  "max_linear_speed": 0.05,
+  "max_angular_speed": 0.25,
+  "max_relative_displacement_m": 0.02,
+  "workspace_min_m": [0.20, -0.40, 0.10],
+  "workspace_max_m": [0.70, 0.40, 0.70],
+  "max_motion_dynamics_factor": 0.20,
+  "relative_dynamics_factor": 0.05,
+  "recover_errors_on_start": false,
+  "allow_error_recovery": false,
+  "allow_one_shot_motion": false
+}
