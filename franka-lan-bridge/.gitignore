@@ -4,4 +4,5 @@ __pycache__/
 .ruff_cache/
 .venv/
 server_config.json
+calibrated_points*.json
 logs/

@@ -227,7 +227,96 @@ python franka_client.py --uri ws://192.168.1.20:8765 move-global `
 - dynamics factor 不超过 `max_motion_dynamics_factor`；
 - 客户端持续持有控制租约，断线立即停止一次性动作。
 
-## 7. 在遥操程序中调用客户端库
+## 7. 标定四个点并按键顺序运动
+
+这两个程序都运行在 Windows 客户端。第一步，先在一个 PowerShell 窗口建立 SSH 隧道，并保持这个窗口运行：
+
+```powershell
+ssh -N `
+  -L 8765:127.0.0.1:8765 `
+  -p 6855 `
+  用户名@10.15.89.229
+```
+
+然后在另一个 PowerShell 中设置与服务端相同的 token：
+
+```powershell
+$env:FRANKA_BRIDGE_TOKEN='与服务端完全相同的随机密钥'
+```
+
+第二步，先读取一次 FR3 状态，确认 SSH 隧道、身份认证和服务端都已正常连接：
+
+```powershell
+python franka_client.py `
+  --uri ws://127.0.0.1:8765 `
+  state
+```
+
+只有这条命令能正常返回机器人状态后，才继续运行下面的标定或顺序运动程序。
+
+### 标定程序
+
+标定程序只读取机器人状态，不申请控制权，也不会主动移动机械臂。先通过手动引导或已有的安全方式把末端放到目标位置，再按一次 `SPACE`：
+
+```powershell
+python franka_calibrate_points.py `
+  --uri ws://127.0.0.1:8765 `
+  --output calibrated_points.json
+```
+
+按键：
+
+- `SPACE`：记录当前末端 Base 坐标 XYZ；
+- `U` 或退格键：撤销上一个点；
+- `Q`、`E` 或 `Esc`：取消，不写文件。
+
+依次记录 `P1`、`P2`、`P3`、`P4` 后自动保存。重新标定已有文件时加 `--overwrite`：
+
+```powershell
+python franka_calibrate_points.py `
+  --uri ws://127.0.0.1:8765 `
+  --output calibrated_points.json `
+  --overwrite
+```
+
+保存文件同时记录了各点的旋转矩阵用于复核，但现有 `FrankaController.move_global()` 只接收 XYZ，所以回放时保持机械臂开始运动时的当前末端旋转。
+
+### 顺序运动程序
+
+真实运动前必须在 FR3 服务端的 `server_config.json` 中：
+
+1. 根据实际工作台收紧 `workspace_min_m` 和 `workspace_max_m`；
+2. 将 `allow_one_shot_motion` 改为 `true`；
+3. 重启 `franka_server.py`。
+
+然后运行：
+
+```powershell
+python franka_next_point.py `
+  --uri ws://127.0.0.1:8765 `
+  --points calibrated_points.json `
+  --dynamics-factor 0.05
+```
+
+按键：
+
+- 每按一次 `SPACE`，依次规划到 `P1 → P2 → P3 → P4`；
+- 运动过程中按 `E`、`Q` 或 `Esc`，立即发送软件停止并退出；
+- 到达每个点后检查实际 XYZ，默认误差必须不超过 `5 mm`；
+- P4 完成后程序释放控制权并退出。
+
+从其他点开始：
+
+```powershell
+python franka_next_point.py `
+  --uri ws://127.0.0.1:8765 `
+  --points calibrated_points.json `
+  --start-index 3
+```
+
+加 `--loop` 可在 P4 后回到 P1。标定文件默认被 `.gitignore` 排除，不会意外提交真实机器人位姿。
+
+## 8. 在遥操程序中调用客户端库
 
 ```python
 import asyncio
@@ -262,7 +351,7 @@ asyncio.run(main())
 
 后续把视觉腕部映射接到 FR3 时，只需将每帧的末端位置增量转换为受限速度，再调用 `send_velocity()`；LEAP Hand 的 16 关节控制仍可以保持独立。
 
-## 8. 本机测试
+## 9. 本机测试
 
 ```powershell
 D:\Environment\Anaconda\envs\autograsp\python.exe -m unittest discover -s tests -v
@@ -273,9 +362,13 @@ D:\Environment\Anaconda\envs\autograsp\python.exe -m unittest discover -s tests 
 ## 目录
 
 - `franka_server.py`：FR3 控制电脑入口；
-- `franka_client.py`：Windows 命令行入口；
+- `franka_client.py`：Windows 通用命令行入口；
+- `franka_calibrate_points.py`：按 SPACE 记录四个末端点；
+- `franka_next_point.py`：按 SPACE 顺序运动到下一个点；
 - `franka_bridge/server.py`：认证、状态流和请求分发；
 - `franka_bridge/runtime.py`：机器人侧租约、看门狗和安全状态机；
 - `franka_bridge/client.py`：可嵌入遥操程序的异步客户端；
+- `franka_bridge/waypoints.py`：四点文件格式和工作空间验证；
+- `franka_bridge/terminal_keys.py`：无额外依赖的非阻塞单键输入；
 - `server_config.example.json`：安全配置模板；
 - `tests/`：无硬件单元和回环测试。

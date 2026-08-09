@@ -5,12 +5,24 @@ import unittest
 import websockets
 from franka_bridge.client import FrankaBridgeClient
 from franka_bridge.mock_controller import MockFrankaController
+from franka_bridge.next_point import OperatorStop, wait_for_motion
 from franka_bridge.runtime import FrankaRuntime
 from franka_bridge.server import FrankaBridgeServer
+from franka_bridge.waypoints import Waypoint
 
 from tests.helpers import test_config
 
 TOKEN = "loopback-test-token-32-characters"
+
+
+class NoKeys:
+    def poll(self) -> str | None:
+        return None
+
+
+class StopKeys:
+    def poll(self) -> str | None:
+        return "e"
 
 
 class LoopbackTests(unittest.IsolatedAsyncioTestCase):
@@ -57,6 +69,64 @@ class LoopbackTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await owner.close()
             await observer.close()
+
+    async def test_absolute_point_motion_completes_with_position_check(self) -> None:
+        target = Waypoint(
+            name="P1",
+            position_m=(0.41, 0.0, 0.3),
+            rotation_matrix=(
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ),
+            robot_timestamp_s=None,
+        )
+        async with FrankaBridgeClient(self.uri, TOKEN) as client:
+            await client.acquire_control()
+            response = await client.move_global(
+                target.position_m,
+                absolute=True,
+                dynamics_factor=0.1,
+            )
+            error = await wait_for_motion(
+                client,
+                target,
+                accepted_at_s=float(response["server_monotonic_s"]),
+                timeout_s=1.0,
+                arrival_tolerance_m=0.001,
+                keys=NoKeys(),
+            )
+            self.assertLessEqual(error, 0.001)
+            await client.release_control()
+
+    async def test_operator_key_stops_motion_and_revokes_control(self) -> None:
+        target = Waypoint(
+            name="P1",
+            position_m=(0.41, 0.0, 0.3),
+            rotation_matrix=(
+                (1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ),
+            robot_timestamp_s=None,
+        )
+        async with FrankaBridgeClient(self.uri, TOKEN) as owner:
+            await owner.acquire_control()
+            response = await owner.move_global(
+                target.position_m,
+                absolute=True,
+                dynamics_factor=0.1,
+            )
+            with self.assertRaises(OperatorStop):
+                await wait_for_motion(
+                    owner,
+                    target,
+                    accepted_at_s=float(response["server_monotonic_s"]),
+                    timeout_s=1.0,
+                    arrival_tolerance_m=0.001,
+                    keys=StopKeys(),
+                )
+            self.assertFalse(self.runtime.bridge_status()["control_lease_active"])
 
 
 if __name__ == "__main__":
